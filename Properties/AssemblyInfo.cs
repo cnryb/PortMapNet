@@ -6,7 +6,7 @@ using portmap_net;
 // 有关程序集的常规信息通过以下
 // 特性集控制。更改这些特性值可修改
 // 与程序集关联的信息。
-[assembly: AssemblyTitle("端口映射器 " + program.product_version + " " + program.product_version_addl)]
+[assembly: AssemblyTitle("端口映射器")]
 [assembly: AssemblyDescription("将TCP端口映射到另一台主机")]
 [assembly: AssemblyConfiguration("")]
 [assembly: AssemblyCompany("www.beta-1.cn")]

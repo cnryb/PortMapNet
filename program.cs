@@ -15,77 +15,22 @@ namespace portmap_net
         #region Fields (4)
 
         private static StringBuilder _console_buf = new StringBuilder();
-        private static int _id_plus = 0;
         private static readonly ILog _l4n = LogManager.GetLogger(typeof(program));
         private static readonly Dictionary<int, stat_obj> _stat_info = new Dictionary<int, stat_obj>();
-        public const string product_version = "0.1.113";
-        public const string product_version_addl = "beta";
         #endregion Fields
 
         #region Methods (8)
 
-        // Private Methods (8) 
-
-        private static List<work_group> load_maps_cfg()
+        static void Main(string[] args)
         {
-            string maps_cfg = ConfigurationManager.AppSettings["portmaps"];
-            if (string.IsNullOrEmpty(maps_cfg))
-                throw new Exception("配置文件错误: 缺少PortMap配置");
+            var mg = new WorkGroup();
+            mg.PointIn = new IPEndPoint(IPAddress.Any, 80);
 
-            string[] tmp1 = maps_cfg.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries);
-            if (tmp1.Length == 0)
-                throw new Exception("配置文件错误: 缺少PortMap配置");
+            
+            mg.PointOutHost = "localhost";
+            mg.PointOutPort = 80;
 
-            List<work_group> rtn = new List<work_group>();
-            foreach (string tmp2 in tmp1)
-            {
-                string[] tmp3 = tmp2.Split(new[] { '|' });
-                if (tmp3.Length != 2)
-                    throw new Exception("配置文件错误: 每组PortMap配置必须为2个节点");
-                work_group rtn_item = new work_group { _id = ++_id_plus };
-                for (int i = 0; i != 2; ++i)
-                {
-                    string[] tmp4 = tmp3[i].Split(new[] { ':' }, StringSplitOptions.RemoveEmptyEntries);
-                    if (tmp4.Length != 2)
-                        throw new Exception("配置文件错误: IP节点格式错误");
-                    IPAddress ip = IPAddress.Any;
-                    if (i == 0 && tmp4[0] != "*" && !IPAddress.TryParse(tmp4[0], out ip))
-                        throw new Exception("配置文件错误: IP节点格式错误");
-                    ushort port;
-                    if (!ushort.TryParse(tmp4[1], out port))
-                        throw new Exception("配置文件错误: IP节点格式错误");
-                    if (i == 0)
-                        rtn_item._point_in = new IPEndPoint(ip, port);
-                    if (i == 1)
-                    {
-                        rtn_item._point_out_host = tmp4[0];
-                        rtn_item._point_out_port = port;
-                    }
-                }
-                rtn.Add(rtn_item);
-            }
-            return rtn;
-        }
-
-        private static void Main(string[] args)
-        {
-            List<work_group> maps_list;
-            try
-            {
-                maps_list = load_maps_cfg();
-            }
-            catch (Exception exp)
-            {
-                Console.WriteLine(program_ver);
-                Console.WriteLine(exp.Message);
-                system("pause");
-                return;
-            }
-            foreach (var map_item in maps_list)
-            {
-                map_start(map_item);
-            }
-
+            map_start(mg);
             Console.CursorVisible = false;
             while (true)
             {
@@ -94,13 +39,13 @@ namespace portmap_net
             }
         }
 
-        private static void map_start(work_group work)
+        private static void map_start(WorkGroup work)
         {
             Socket sock_svr = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
             bool start_error = false;
             try
             {
-                sock_svr.Bind(work._point_in);
+                sock_svr.Bind(work.PointIn);
                 sock_svr.Listen(10);
                 sock_svr.BeginAccept(on_local_connected, new object[] { sock_svr, work });
             }
@@ -111,7 +56,7 @@ namespace portmap_net
             }
             finally
             {
-                _stat_info.Add(work._id, new stat_obj(work._point_in.ToString(), work._point_out_host + ":" + work._point_out_port, !start_error, 0, 0, 0));
+                _stat_info.Add(work.Id, new stat_obj(work.PointIn.ToString(), work.PointOutHost + ":" + work.PointOutPort, !start_error, 0, 0, 0));
             }
         }
 
@@ -119,15 +64,15 @@ namespace portmap_net
         {
             object[] ar_arr = ar.AsyncState as object[];
             Socket sock_svr = ar_arr[0] as Socket;
-            work_group work = (work_group)ar_arr[1];
+            WorkGroup work = (WorkGroup)ar_arr[1];
 
-            ++_stat_info[work._id]._connect_cnt;
+            ++_stat_info[work.Id]._connect_cnt;
             Socket sock_cli = sock_svr.EndAccept(ar);
             sock_svr.BeginAccept(on_local_connected, ar.AsyncState);
             Socket sock_cli_remote = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
             try
             {
-                sock_cli_remote.Connect(work._point_out_host, work._point_out_port);
+                sock_cli_remote.Connect(work.PointOutHost, work.PointOutPort);
             }
             catch (Exception exp)
             {
@@ -140,16 +85,16 @@ namespace portmap_net
                     sock_cli_remote.Close();
                 }
                 catch (Exception) { }
-                --_stat_info[work._id]._connect_cnt;
+                --_stat_info[work.Id]._connect_cnt;
                 return;
             }
             Thread t_send = new Thread(new ParameterizedThreadStart(recv_and_send_caller)) { IsBackground = true };
             Thread t_recv = new Thread(new ParameterizedThreadStart(recv_and_send_caller)) { IsBackground = true };
-            t_send.Start(new object[] { sock_cli, sock_cli_remote, work._id, true });
-            t_recv.Start(new object[] { sock_cli_remote, sock_cli, work._id, false });
+            t_send.Start(new object[] { sock_cli, sock_cli_remote, work.Id, true });
+            t_recv.Start(new object[] { sock_cli_remote, sock_cli, work.Id, false });
             t_send.Join();
             t_recv.Join();
-            --_stat_info[work._id]._connect_cnt;
+            --_stat_info[work.Id]._connect_cnt;
         }
 
         private static void recv_and_send(Socket from_sock, Socket to_sock, Action<int> send_complete)
@@ -196,7 +141,6 @@ namespace portmap_net
         private static void show_stat()
         {
             StringBuilder curr_buf = new StringBuilder();
-            curr_buf.AppendLine(program_ver);
             curr_buf.AppendLine(stat_obj._print_head);
             foreach (KeyValuePair<int, stat_obj> item in _stat_info)
             {
@@ -209,12 +153,8 @@ namespace portmap_net
             _console_buf = curr_buf;
         }
 
-        [DllImport("msvcrt.dll")]
-        private static extern bool system(string str);
-
         #endregion Methods
 
-        private const string program_ver = @"[PortMapNet(0.1)  http://www.beta-1.cn]
---------------------------------------------------";
+
     }
 }

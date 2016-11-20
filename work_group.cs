@@ -2,15 +2,24 @@
 
 namespace portmap_net
 {
-    internal struct work_group
+    class WorkGroup
     {
-        #region Data Members (4)
+        public int Id { get; set; }
 
-        public int _id;
-        public EndPoint _point_in;
-        public string _point_out_host;
-        public ushort _point_out_port;
+        /// <summary>
+        /// 检测端口
+        /// </summary>
+        public EndPoint PointIn { get; set; }
 
-        #endregion Data Members
+        /// <summary>
+        /// 转发到的主机
+        /// </summary>
+        public string PointOutHost { get; set; }
+
+        /// <summary>
+        /// 转发到的端口
+        /// </summary>
+        public ushort PointOutPort;
+
     }
 }
