@@ -24,7 +24,7 @@ namespace portmap_net
         static void Main(string[] args)
         {
             var mg = new WorkGroup();
-            mg.PointIn = new IPEndPoint(IPAddress.Any, 80);
+            mg.PointIn = new IPEndPoint(IPAddress.Any, 8000);
 
             
             mg.PointOutHost = "localhost";
@@ -81,8 +81,8 @@ namespace portmap_net
                 {
                     sock_cli.Shutdown(SocketShutdown.Both);
                     sock_cli_remote.Shutdown(SocketShutdown.Both);
-                    sock_cli.Close();
-                    sock_cli_remote.Close();
+                    sock_cli.Dispose();
+                    sock_cli_remote.Dispose();
                 }
                 catch (Exception) { }
                 --_stat_info[work.Id]._connect_cnt;
@@ -131,8 +131,8 @@ namespace portmap_net
                 {
                     sock1.Shutdown(SocketShutdown.Both);
                     sock2.Shutdown(SocketShutdown.Both);
-                    sock1.Close();
-                    sock2.Close();
+                    sock1.Dispose();
+                    sock2.Dispose();
                 }
                 catch (Exception) { }
             }
