@@ -19,14 +19,13 @@ namespace portmap_net
         private static readonly Dictionary<int, stat_obj> _stat_info = new Dictionary<int, stat_obj>();
         #endregion Fields
 
-        #region Methods (8)
 
         static void Main(string[] args)
         {
             var mg = new WorkGroup();
             mg.PointIn = new IPEndPoint(IPAddress.Any, 8000);
 
-            
+
             mg.PointOutHost = "localhost";
             mg.PointOutPort = 80;
 
@@ -88,14 +87,82 @@ namespace portmap_net
                 --_stat_info[work.Id]._connect_cnt;
                 return;
             }
-            Thread t_send = new Thread(new ParameterizedThreadStart(recv_and_send_caller)) { IsBackground = true };
-            Thread t_recv = new Thread(new ParameterizedThreadStart(recv_and_send_caller)) { IsBackground = true };
-            t_send.Start(new object[] { sock_cli, sock_cli_remote, work.Id, true });
-            t_recv.Start(new object[] { sock_cli_remote, sock_cli, work.Id, false });
+            Thread t_send = new Thread(new ParameterizedThreadStart(send_caller)) { IsBackground = true };
+            Thread t_recv = new Thread(new ParameterizedThreadStart(recv_caller)) { IsBackground = true };
+            t_send.Start(new object[] { sock_cli, sock_cli_remote, work.Id });
+            t_recv.Start(new object[] { sock_cli_remote, sock_cli, work.Id });
             t_send.Join();
             t_recv.Join();
             --_stat_info[work.Id]._connect_cnt;
         }
+
+        private static void recv_caller(object thread_param)
+        {
+            object[] param_arr = thread_param as object[];
+            Socket sock_cli_remote = param_arr[0] as Socket;
+            Socket sock_cli = param_arr[1] as Socket;
+            try
+            {
+                recv_and_send(sock_cli_remote, sock_cli, bytes =>
+                {
+                    stat_obj stat = _stat_info[(int)param_arr[2]];
+                    stat._bytes_recv += bytes;
+                });
+            }
+            catch (Exception exp)
+            {
+                _l4n.Info(exp.Message);
+                try
+                {
+                    sock_cli_remote.Shutdown(SocketShutdown.Both);
+                    sock_cli.Shutdown(SocketShutdown.Both);
+                    sock_cli_remote.Dispose();
+                    sock_cli.Dispose();
+                }
+                catch (Exception) { }
+            }
+        }
+
+        private static void send_caller(object thread_param)
+        {
+            object[] param_arr = thread_param as object[];
+            Socket from_sock = param_arr[0] as Socket;
+            Socket to_sock = param_arr[1] as Socket;
+            try
+            {
+                recv_and_send(from_sock, to_sock, bytes =>
+                {
+                    stat_obj stat = _stat_info[(int)param_arr[2]];
+                    stat._bytes_send += bytes;
+                });
+
+                //byte[] recv_buf = new byte[4096];
+                //int recv_len;
+                //while ((recv_len = from_sock.Receive(recv_buf)) > 0)
+                //{
+                //    to_sock.Send(recv_buf, 0, recv_len, SocketFlags.None);
+                //    send_complete(recv_len);
+                //    stat_obj stat = _stat_info[(int)param_arr[2]];
+                //    stat._bytes_send += recv_len;
+                //}
+            }
+            catch (Exception exp)
+            {
+                _l4n.Info(exp.Message);
+            }
+            finally
+            {
+                try
+                {
+                    from_sock.Shutdown(SocketShutdown.Both);
+                    to_sock.Shutdown(SocketShutdown.Both);
+                    from_sock.Dispose();
+                    to_sock.Dispose();
+                }
+                catch (Exception) { }
+            }
+        }
+
 
         private static void recv_and_send(Socket from_sock, Socket to_sock, Action<int> send_complete)
         {
@@ -108,35 +175,6 @@ namespace portmap_net
             }
         }
 
-        private static void recv_and_send_caller(object thread_param)
-        {
-            object[] param_arr = thread_param as object[];
-            Socket sock1 = param_arr[0] as Socket;
-            Socket sock2 = param_arr[1] as Socket;
-            try
-            {
-                recv_and_send(sock1, sock2, bytes =>
-                {
-                    stat_obj stat = _stat_info[(int)param_arr[2]];
-                    if ((bool)param_arr[3])
-                        stat._bytes_send += bytes;
-                    else
-                        stat._bytes_recv += bytes;
-                });
-            }
-            catch (Exception exp)
-            {
-                _l4n.Info(exp.Message);
-                try
-                {
-                    sock1.Shutdown(SocketShutdown.Both);
-                    sock2.Shutdown(SocketShutdown.Both);
-                    sock1.Dispose();
-                    sock2.Dispose();
-                }
-                catch (Exception) { }
-            }
-        }
 
         private static void show_stat()
         {
@@ -152,8 +190,6 @@ namespace portmap_net
             Console.WriteLine(curr_buf);
             _console_buf = curr_buf;
         }
-
-        #endregion Methods
 
 
     }
