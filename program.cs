@@ -22,14 +22,18 @@ namespace portmap_net
 
         static void Main(string[] args)
         {
-            var mg = new WorkGroup();
-            mg.PointIn = new IPEndPoint(IPAddress.Any, 8000);
+            var work = new WorkGroup();
+            work.PointIn = new IPEndPoint(IPAddress.Any, 8000);
 
 
-            mg.PointOutHost = "localhost";
-            mg.PointOutPort = 80;
+            work.PointOutHost = "localhost";
+            work.PointOutPort = 80;
 
-            map_start(mg);
+            ThreadPool.QueueUserWorkItem(c =>
+            {
+                map_start(work);
+            });
+
             Console.CursorVisible = false;
             while (true)
             {
@@ -44,56 +48,50 @@ namespace portmap_net
             bool start_error = false;
             try
             {
+                _stat_info.Add(work.Id, new stat_obj(work.PointIn.ToString(), work.PointOutHost + ":" + work.PointOutPort, !start_error, 0, 0, 0));
                 sock_svr.Bind(work.PointIn);
                 sock_svr.Listen(10);
-                sock_svr.BeginAccept(on_local_connected, new object[] { sock_svr, work });
+                while (true)
+                {
+                    Socket sock_cli = sock_svr.Accept();
+                    ThreadPool.QueueUserWorkItem(c =>
+                    {
+                        ++_stat_info[work.Id]._connect_cnt;
+                        Socket sock_cli_remote = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+                        try
+                        {
+                            sock_cli_remote.Connect(work.PointOutHost, work.PointOutPort);
+                        }
+                        catch (Exception exp)
+                        {
+                            _l4n.Warn(exp.Message);
+                            try
+                            {
+                                sock_cli.Shutdown(SocketShutdown.Both);
+                                sock_cli_remote.Shutdown(SocketShutdown.Both);
+                                sock_cli.Dispose();
+                                sock_cli_remote.Dispose();
+                            }
+                            catch (Exception) { }
+                            --_stat_info[work.Id]._connect_cnt;
+                            return;
+                        }
+                        Thread t_send = new Thread(new ParameterizedThreadStart(send_caller)) { IsBackground = true };
+                        Thread t_recv = new Thread(new ParameterizedThreadStart(recv_caller)) { IsBackground = true };
+                        t_send.Start(new object[] { sock_cli, sock_cli_remote, work.Id });
+                        t_recv.Start(new object[] { sock_cli_remote, sock_cli, work.Id });
+                        t_send.Join();
+                        t_recv.Join();
+                        --_stat_info[work.Id]._connect_cnt;
+                    });
+                }
+
             }
             catch (Exception exp)
             {
                 _l4n.Error(exp.Message);
                 start_error = true;
             }
-            finally
-            {
-                _stat_info.Add(work.Id, new stat_obj(work.PointIn.ToString(), work.PointOutHost + ":" + work.PointOutPort, !start_error, 0, 0, 0));
-            }
-        }
-
-        private static void on_local_connected(IAsyncResult ar)
-        {
-            object[] ar_arr = ar.AsyncState as object[];
-            Socket sock_svr = ar_arr[0] as Socket;
-            WorkGroup work = (WorkGroup)ar_arr[1];
-
-            ++_stat_info[work.Id]._connect_cnt;
-            Socket sock_cli = sock_svr.EndAccept(ar);
-            sock_svr.BeginAccept(on_local_connected, ar.AsyncState);
-            Socket sock_cli_remote = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-            try
-            {
-                sock_cli_remote.Connect(work.PointOutHost, work.PointOutPort);
-            }
-            catch (Exception exp)
-            {
-                _l4n.Warn(exp.Message);
-                try
-                {
-                    sock_cli.Shutdown(SocketShutdown.Both);
-                    sock_cli_remote.Shutdown(SocketShutdown.Both);
-                    sock_cli.Dispose();
-                    sock_cli_remote.Dispose();
-                }
-                catch (Exception) { }
-                --_stat_info[work.Id]._connect_cnt;
-                return;
-            }
-            Thread t_send = new Thread(new ParameterizedThreadStart(send_caller)) { IsBackground = true };
-            Thread t_recv = new Thread(new ParameterizedThreadStart(recv_caller)) { IsBackground = true };
-            t_send.Start(new object[] { sock_cli, sock_cli_remote, work.Id });
-            t_recv.Start(new object[] { sock_cli_remote, sock_cli, work.Id });
-            t_send.Join();
-            t_recv.Join();
-            --_stat_info[work.Id]._connect_cnt;
         }
 
         private static void recv_caller(object thread_param)
@@ -135,16 +133,6 @@ namespace portmap_net
                     stat_obj stat = _stat_info[(int)param_arr[2]];
                     stat._bytes_send += bytes;
                 });
-
-                //byte[] recv_buf = new byte[4096];
-                //int recv_len;
-                //while ((recv_len = from_sock.Receive(recv_buf)) > 0)
-                //{
-                //    to_sock.Send(recv_buf, 0, recv_len, SocketFlags.None);
-                //    send_complete(recv_len);
-                //    stat_obj stat = _stat_info[(int)param_arr[2]];
-                //    stat._bytes_send += recv_len;
-                //}
             }
             catch (Exception exp)
             {
