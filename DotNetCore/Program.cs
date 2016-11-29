@@ -35,22 +35,23 @@ class Program
             show_stat();
             Thread.Sleep(2000);
         }
+
+        WaitHandle.WaitAll(new ManualResetEvent[] { new ManualResetEvent(false) });
     }
 
     private static async Task Start(WorkGroup work)
     {
-        bool start_error = false;
         try
         {
             TcpListener listner = new TcpListener(work.PointIn);
             listner.Start();
-            _stat_info.Add(work.Id, new stat_obj(work.PointIn.ToString(), work.PointOutHost + ":" + work.PointOutPort, !start_error, 0, 0, 0));
+            _stat_info.Add(work.Id, new stat_obj(work));
             while (true)
             {
-                var  fromClient = await listner.AcceptTcpClientAsync();
+                var fromClient = await listner.AcceptTcpClientAsync();
                 ThreadPool.QueueUserWorkItem(c =>
                 {
-                    ++_stat_info[work.Id]._connect_cnt;
+                    ++_stat_info[work.Id].ConnectCount;
                     TcpClient toClient = new TcpClient();
                     try
                     {
@@ -65,16 +66,16 @@ class Program
                             toClient.Dispose();
                         }
                         catch (Exception) { }
-                        --_stat_info[work.Id]._connect_cnt;
+                        --_stat_info[work.Id].ConnectCount;
                         return;
                     }
-                    Thread t_send = new Thread(new ParameterizedThreadStart(send_caller)) { IsBackground = true };
-                    Thread t_recv = new Thread(new ParameterizedThreadStart(recv_caller)) { IsBackground = true };
+                    Thread t_send = new Thread(new ParameterizedThreadStart(Send)) { IsBackground = true };
+                    Thread t_recv = new Thread(new ParameterizedThreadStart(Receive)) { IsBackground = true };
                     t_send.Start(new object[] { fromClient, toClient, work.Id });
                     t_recv.Start(new object[] { toClient, fromClient, work.Id });
                     t_send.Join();
                     t_recv.Join();
-                    --_stat_info[work.Id]._connect_cnt;
+                    --_stat_info[work.Id].ConnectCount;
                 });
             }
 
@@ -82,21 +83,21 @@ class Program
         catch (Exception exp)
         {
             //_l4n.Error(exp.Message);
-            start_error = true;
+            _stat_info[work.Id].IsRunning = false;
         }
     }
 
-    private static void recv_caller(object thread_param)
+    private static void Receive(object thread_param)
     {
         object[] param_arr = thread_param as object[];
         var sock_cli_remote = param_arr[0] as TcpClient;
         var sock_cli = param_arr[1] as TcpClient;
         try
         {
-            recv_and_send(sock_cli_remote, sock_cli, bytes =>
+            Transfer(sock_cli_remote, sock_cli, bytes =>
             {
                 stat_obj stat = _stat_info[(int)param_arr[2]];
-                stat._bytes_recv += bytes;
+                stat.ReceiveBytes += bytes;
             });
         }
         catch (Exception exp)
@@ -111,17 +112,17 @@ class Program
         }
     }
 
-    private static void send_caller(object thread_param)
+    private static void Send(object thread_param)
     {
         object[] param_arr = thread_param as object[];
         var from_sock = param_arr[0] as TcpClient;
         var to_sock = param_arr[1] as TcpClient;
         try
         {
-            recv_and_send(from_sock, to_sock, bytes =>
+            Transfer(from_sock, to_sock, bytes =>
             {
                 stat_obj stat = _stat_info[(int)param_arr[2]];
-                stat._bytes_send += bytes;
+                stat.SendBytes += bytes;
             });
         }
         catch (Exception exp)
@@ -140,13 +141,13 @@ class Program
     }
 
 
-    private static void recv_and_send(TcpClient fromClient, TcpClient toClient, Action<int> send_complete)
+    private static void Transfer(TcpClient fromClient, TcpClient toClient, Action<int> send_complete)
     {
-        var fns=fromClient.GetStream();
+        var fns = fromClient.GetStream();
         var tns = toClient.GetStream();
         byte[] buff = new byte[4096];
         int recv_len;
-        while ((recv_len = fns.Read(buff,0,buff.Length)) > 0)
+        while ((recv_len = fns.Read(buff, 0, buff.Length)) > 0)
         {
             tns.Write(buff, 0, recv_len);
             send_complete(recv_len);

@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Net;
 using System.Text;
 
 namespace DotNetCore
@@ -8,39 +9,79 @@ namespace DotNetCore
     {
         #region Fields (5)
 
-        public int _connect_cnt;
-        public string _point_in;
-        public string _point_out;
-        public const string _print_head = "输入IP              输出IP              状态    连接数    接收/发送";
-        public bool _running;
-        public long _bytes_send;
-        public long _bytes_recv;
+        /// <summary>
+        /// 连接数
+        /// </summary>
+        public int ConnectCount { get; set; }
 
+        /// <summary>
+        /// 输入IP:端口
+        /// </summary>
+        public string PointIn { get; set; }
+
+        /// <summary>
+        /// 输出IP:端口
+        /// </summary>
+        public string PointOut { get; set; }
+
+        /// <summary>
+        /// 是否正在运行
+        /// </summary>
+        public bool IsRunning { get; set; }
+
+        /// <summary>
+        /// 发送的字节数
+        /// </summary>
+        public long SendBytes { get; set; }
+
+        /// <summary>
+        /// 接收到的字节数
+        /// </summary>
+        public long ReceiveBytes { get; set; }
+
+        /// <summary>
+        /// The size suffixes.
+        /// </summary>
+        private static readonly string[] SizeSuffixes = { "bytes", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB" };
+
+
+        public const string _print_head = "输入IP              输出IP              状态    连接数    接收/发送";
         #endregion Fields
 
         #region Constructors (1)
 
-        public stat_obj(string point_in, string point_out, bool running, int connect_cnt, int bytes_send, int bytes_recv)
+
+        public stat_obj(WorkGroup work)
         {
-            _point_in = point_in;
-            _point_out = point_out;
-            _running = running;
-            _connect_cnt = connect_cnt;
-            _bytes_recv = bytes_recv;
-            _bytes_send = bytes_send;
+            PointIn = work.PointIn.ToString();
+            PointOut = work.PointOutHost + ":" + work.PointOutPort;
+            IsRunning = true;
         }
 
         #endregion Constructors
 
-        #region Methods (1)
 
-        // Public Methods (1) 
 
         public override string ToString()
         {
-            return string.Format("{0}{1}{2}{3}{4}", _point_in.PadRight(20, ' '), _point_out.PadRight(20, ' '), (_running ? "运行中  " : "启动失败"), _connect_cnt.ToString().PadRight(10, ' '), Math.Round((double)_bytes_recv / 1024) + "k/" + Math.Round((double)_bytes_send / 1024) + "k");
+            return string.Format($"{PointIn.PadRight(20, ' ')}{ PointOut.PadRight(20, ' ')}{(IsRunning ? "运行中  " : "启动失败")}{ConnectCount.ToString().PadRight(10, ' ')}{SizeSuffix(ReceiveBytes)}/{SizeSuffix(SendBytes)}");
         }
 
-        #endregion Methods
+
+        /// <summary>
+        /// Suffix (Gb,Mb,Kb suffix) of given bytes
+        /// </summary>
+        /// <param name="value">  size of file in bytes </param>
+        /// <returns> suffix of file size </returns>
+        private static string SizeSuffix(long value)
+        {
+            if (value == 0)
+                return "0";
+            int mag = (int)Math.Log(value, 1024);
+            decimal adjustedSize = (decimal)value / (1 << (mag * 10));
+
+            return string.Format("{0:n1} {1}", adjustedSize, SizeSuffixes[mag]);
+        }
+
     }
 }
