@@ -5,6 +5,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
 
 class Program
 {
@@ -20,12 +21,12 @@ class Program
         work.PointIn = new IPEndPoint(IPAddress.Any, 8000);
 
 
-        work.PointOutHost = "localhost";
+        work.PointOutHost = "10.0.0.111";
         work.PointOutPort = 80;
 
         ThreadPool.QueueUserWorkItem(c =>
         {
-            Start(work);
+            Task.WaitAll(Start(work));
         });
 
         Console.CursorVisible = false;
@@ -36,35 +37,32 @@ class Program
         }
     }
 
-    private static void Start(WorkGroup work)
+    private static async Task Start(WorkGroup work)
     {
         bool start_error = false;
         try
         {
-            Socket serverSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+            TcpListener listner = new TcpListener(work.PointIn);
+            listner.Start();
             _stat_info.Add(work.Id, new stat_obj(work.PointIn.ToString(), work.PointOutHost + ":" + work.PointOutPort, !start_error, 0, 0, 0));
-            serverSocket.Bind(work.PointIn);
-            serverSocket.Listen(10);
             while (true)
             {
-                Socket fromSocket = serverSocket.Accept();
+                var  fromClient = await listner.AcceptTcpClientAsync();
                 ThreadPool.QueueUserWorkItem(c =>
                 {
                     ++_stat_info[work.Id]._connect_cnt;
-                    Socket toSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+                    TcpClient toClient = new TcpClient();
                     try
                     {
-                        toSocket.Connect(work.PointOutHost, work.PointOutPort);
+                        toClient.ConnectAsync(work.PointOutHost, work.PointOutPort);
                     }
                     catch (Exception exp)
                     {
                         //_l4n.Warn(exp.Message);
                         try
                         {
-                            fromSocket.Shutdown(SocketShutdown.Both);
-                            toSocket.Shutdown(SocketShutdown.Both);
-                            fromSocket.Dispose();
-                            toSocket.Dispose();
+                            fromClient.Dispose();
+                            toClient.Dispose();
                         }
                         catch (Exception) { }
                         --_stat_info[work.Id]._connect_cnt;
@@ -72,8 +70,8 @@ class Program
                     }
                     Thread t_send = new Thread(new ParameterizedThreadStart(send_caller)) { IsBackground = true };
                     Thread t_recv = new Thread(new ParameterizedThreadStart(recv_caller)) { IsBackground = true };
-                    t_send.Start(new object[] { fromSocket, toSocket, work.Id });
-                    t_recv.Start(new object[] { toSocket, fromSocket, work.Id });
+                    t_send.Start(new object[] { fromClient, toClient, work.Id });
+                    t_recv.Start(new object[] { toClient, fromClient, work.Id });
                     t_send.Join();
                     t_recv.Join();
                     --_stat_info[work.Id]._connect_cnt;
@@ -91,8 +89,8 @@ class Program
     private static void recv_caller(object thread_param)
     {
         object[] param_arr = thread_param as object[];
-        Socket sock_cli_remote = param_arr[0] as Socket;
-        Socket sock_cli = param_arr[1] as Socket;
+        var sock_cli_remote = param_arr[0] as TcpClient;
+        var sock_cli = param_arr[1] as TcpClient;
         try
         {
             recv_and_send(sock_cli_remote, sock_cli, bytes =>
@@ -106,8 +104,6 @@ class Program
             //_l4n.Info(exp.Message);
             try
             {
-                sock_cli_remote.Shutdown(SocketShutdown.Both);
-                sock_cli.Shutdown(SocketShutdown.Both);
                 sock_cli_remote.Dispose();
                 sock_cli.Dispose();
             }
@@ -118,8 +114,8 @@ class Program
     private static void send_caller(object thread_param)
     {
         object[] param_arr = thread_param as object[];
-        Socket from_sock = param_arr[0] as Socket;
-        Socket to_sock = param_arr[1] as Socket;
+        var from_sock = param_arr[0] as TcpClient;
+        var to_sock = param_arr[1] as TcpClient;
         try
         {
             recv_and_send(from_sock, to_sock, bytes =>
@@ -136,8 +132,6 @@ class Program
         {
             try
             {
-                from_sock.Shutdown(SocketShutdown.Both);
-                to_sock.Shutdown(SocketShutdown.Both);
                 from_sock.Dispose();
                 to_sock.Dispose();
             }
@@ -146,13 +140,15 @@ class Program
     }
 
 
-    private static void recv_and_send(Socket from_sock, Socket to_sock, Action<int> send_complete)
+    private static void recv_and_send(TcpClient fromClient, TcpClient toClient, Action<int> send_complete)
     {
-        byte[] recv_buf = new byte[4096];
+        var fns=fromClient.GetStream();
+        var tns = toClient.GetStream();
+        byte[] buff = new byte[4096];
         int recv_len;
-        while ((recv_len = from_sock.Receive(recv_buf)) > 0)
+        while ((recv_len = fns.Read(buff,0,buff.Length)) > 0)
         {
-            to_sock.Send(recv_buf, 0, recv_len, SocketFlags.None);
+            tns.Write(buff, 0, recv_len);
             send_complete(recv_len);
         }
     }

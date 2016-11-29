@@ -12,7 +12,7 @@ namespace DotNetCore
         /// <summary>
         /// 检测端口
         /// </summary>
-        public EndPoint PointIn { get; set; }
+        public IPEndPoint PointIn { get; set; }
 
         /// <summary>
         /// 转发到的主机
